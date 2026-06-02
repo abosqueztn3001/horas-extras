@@ -307,8 +307,8 @@ td.holi-cell{background:var(--red-bg)}
       <option value="normal">Normal — ingresa hora de salida</option>
       <option value="turno_m">Turno mañana (entre semana)</option>
       <option value="turno_n">Turno noche (entre semana)</option>
-      <option value="dia_completo">Día completo pagado (entre semana)</option>
-      <option value="turno_w">Turno fin de semana / feriado</option>
+      <option value="dia_completo">Día completo pagado</option>
+
       <option value="vacaciones">Vacaciones</option>
       <option value="permiso">Permiso / Maternidad</option>
       <option value="no_labora">No labora</option>
@@ -319,11 +319,9 @@ td.holi-cell{background:var(--red-bg)}
       <div class="hlive" id="pLive"></div>
     </div>
     <div id="descansoRow" style="display:none;margin-top:10px">
-      <label style="display:block;font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:5px">Hora de salida (fin del día)</label>
-      <input class="pinp" type="text" id="pSalida2" placeholder="17:00" maxlength="5" oninput="livHE()" style="margin-bottom:8px">
-      <label style="display:block;font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:5px">Tiempo de descanso/almuerzo a descontar</label>
-      <input class="pinp" type="text" id="pDescanso" placeholder="01:00" maxlength="5" oninput="livHE()" style="font-size:16px">
-      <div class="phint">Ingresa el tiempo de descanso en formato HH:MM (ej: 01:00 = 1 hora)</div>
+      <label style="display:block;font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:5px">Hora de salida</label>
+      <input class="pinp" type="text" id="pSalida2" placeholder="17:00" maxlength="5" oninput="livHE()">
+      <div class="phint">Horas pagadas = (salida − 08:00) − 1h almuerzo</div>
     </div>
     <div id="pagarRow" style="display:none;margin-top:10px;padding:9px 12px;background:var(--amber-bg);border-radius:var(--r);border:1px solid #D4A44A">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--amber)">
@@ -538,11 +536,9 @@ function computeAll(e,d){
   if(e.status==='turno_w')return{he:540,extra:0};
   if(e.status==='dia_completo'){
     const t=parseSal(e.salida);
-    const td=parseSal(e.descanso||'00:00');
     if(!t)return{he:0,extra:0};
-    const worked=(t.h*60+t.min)-480; // from 08:00
-    const rest=td?td.h*60+td.min:0;
-    return{he:Math.max(0,worked-rest),extra:0};
+    const worked=(t.h*60+t.min)-480-60; // from 08:00 minus 1h lunch
+    return{he:Math.max(0,worked),extra:0};
   }
   if(['turno_m','turno_n'].includes(e.status))return{he:0,extra:0};
   const t=parseSal(e.salida);if(!t)return{he:0,extra:0};
@@ -657,10 +653,9 @@ function cellC(empId,d,isW,hol){
   if(s==='turno_m')return`<div class="ci"><span class="tag tTm">T·M</span></div>`;
   if(s==='turno_n')return`<div class="ci"><span class="tag tTn">T·N</span></div>`;
   if(s==='dia_completo'){
-    const t=parseSal(e.salida),td=parseSal(e.descanso||'00:00');
     const he=computeAll(e,d).he;
     const byTag=e.registeredBy?`<span class="cell-by">${e.registeredBy}</span>`:'';
-    return`<div class="ci"><span class="tag tDC">${heShort(he)} ✓</span><span class="tTm-s">${e.salida||''}${e.descanso?'−'+e.descanso:''}</span>${byTag}</div>`;
+    return`<div class="ci"><span class="tag tDC">${heShort(he)} ✓</span><span class="tTm-s">${e.salida||''}</span>${byTag}</div>`;
   }
   if(s==='vacaciones')return`<div class="ci"><span class="tag tV">Vac</span></div>`;
   if(s==='permiso')return`<div class="ci"><span class="tag tP">Per</span></div>`;
@@ -690,8 +685,6 @@ function openP(empId,d,evt){
   if(pagarCk)pagarCk.checked=existing.pagar||false;
   const sal2El=document.getElementById('pSalida2');
   if(sal2El)sal2El.value=existing.status==='dia_completo'?existing.salida||'':'';
-  const descEl=document.getElementById('pDescanso');
-  if(descEl)descEl.value=existing.descanso||'';
   document.getElementById('pDel').style.display=existing.status?'inline-flex':'none';
   // Show last registered-by info
   const byInfo=document.getElementById('pByInfo');
@@ -735,11 +728,9 @@ function livHE(){
   const lv=document.getElementById('pLive');
   if(st==='dia_completo'){
     const sal2=(document.getElementById('pSalida2')?.value||'').trim();
-    const desc=(document.getElementById('pDescanso')?.value||'').trim();
     if(!sal2||!/^\d{1,2}:\d{2}$/.test(sal2)){lv.className='hlive';return;}
-    const fakeE={status:'dia_completo',salida:sal2,descanso:desc};
-    const he=computeAll(fakeE,eDay).he;
-    if(he>0){lv.className='hlive yes';lv.textContent='✓ Total pagado: '+mStr(he);}
+    const he=computeAll({status:'dia_completo',salida:sal2},eDay).he;
+    if(he>0){lv.className='hlive yes';lv.textContent='✓ Total pagado: '+mStr(he)+' (salida − 08:00 − 1h almuerzo)';}
     else{lv.className='hlive';}
     return;
   }
@@ -766,14 +757,11 @@ function saveE(){
   const pagarEl=document.getElementById('pagarCheck');
   const pagar=pagarEl?pagarEl.checked:false;
   let salida_final=salida;
-  let descanso='';
   if(status==='dia_completo'){
     salida_final=(document.getElementById('pSalida2')?.value||'').trim();
-    descanso=(document.getElementById('pDescanso')?.value||'').trim();
-    if(salida_final&&!/^\d{1,2}:\d{2}$/.test(salida_final)){alert('Formato hora salida: HH:MM');return;}
-    if(descanso&&!/^\d{1,2}:\d{2}$/.test(descanso)){alert('Formato descanso: HH:MM');return;}
+    if(!salida_final||!/^\d{1,2}:\d{2}$/.test(salida_final)){alert('Ingresa la hora de salida en formato HH:MM');return;}
   }
-  const entry={status,salida:salida_final,descanso,pagar,registeredBy,registeredAt};
+  const entry={status,salida:salida_final,pagar,registeredBy,registeredAt};
   if(!DATA[eEmpId])DATA[eEmpId]={};
   DATA[eEmpId][eDay]=entry; // local copy for immediate UI
   saveEntry(eEmpId,eDay,entry); // Firebase
@@ -964,8 +952,9 @@ function buildPayload(empId,day,entry){
     year:Y,month:M+1,monthName:MONTHS[M],
     empId,empName:emp.name,city:emp.city,
     day,status:entry?entry.status:'',salida:entry?entry.salida||'':'',
-    heMin:he,heStr:he>0?mStr(he):'',
-    extraMin:extra,extraStr:extra>0?mStr(extra):'',
+    salidaDisplay:entry?(entry.salida?'`'+entry.salida:''):'',
+    heMin:he,heStr:he>0?mStr(he):'',heDisplay:he>0?mStr(he):'',
+    extraMin:extra,extraStr:extra>0?mStr(extra):'',extraDisplay:extra>0?mStr(extra):'',
     deleted:!entry,
     registeredBy:entry?entry.registeredBy||'':'',
     registeredAt:entry?entry.registeredAt||'':'',
